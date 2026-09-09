@@ -1,5 +1,6 @@
 (() => {
   const STORAGE_KEY = 'account-book-transactions';
+  const BUDGET_KEY = 'account-book-budgets';
 
   const CATEGORIES = {
     expense: [
@@ -39,6 +40,16 @@
   const filterButtons = document.querySelectorAll('.filter-btn');
   const toast = $('#toast');
 
+  const budgetTitle = $('#budgetTitle');
+  const budgetForm = $('#budgetForm');
+  const budgetInput = $('#budgetInput');
+  const budgetBadge = $('#budgetBadge');
+  const budgetProgress = $('#budgetProgress');
+  const budgetUsedEl = $('#budgetUsed');
+  const budgetTotalEl = $('#budgetTotal');
+  const budgetPercentEl = $('#budgetPercent');
+  const budgetBarFill = $('#budgetBarFill');
+
   let currentType = 'expense';
   let currentFilter = 'all';
   let viewDate = new Date();
@@ -59,6 +70,22 @@
   }
 
   let transactions = loadTransactions();
+
+  function loadBudgets() {
+    try {
+      const raw = localStorage.getItem(BUDGET_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      console.error('failed to load budgets', e);
+      return {};
+    }
+  }
+
+  function saveBudgets(map) {
+    localStorage.setItem(BUDGET_KEY, JSON.stringify(map));
+  }
+
+  let budgets = loadBudgets();
 
   function formatWon(n) {
     return n.toLocaleString('ko-KR') + '원';
@@ -160,9 +187,61 @@
     return div.innerHTML;
   }
 
+  function isCurrentCalendarMonth(date) {
+    const now = new Date();
+    return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+  }
+
+  function renderBudget() {
+    budgetTitle.textContent = isCurrentCalendarMonth(viewDate)
+      ? '이번 달 예산'
+      : `${viewDate.getMonth() + 1}월 예산`;
+
+    const key = monthKey(viewDate);
+    const budget = budgets[key];
+    const used = getMonthTransactions()
+      .filter((t) => t.type === 'expense')
+      .reduce((s, t) => s + t.amount, 0);
+
+    // reflect the viewed month's saved budget in the input (or blank if none)
+    budgetInput.value = budget ? budget : '';
+
+    budgetBarFill.classList.remove('warning', 'danger');
+    budgetPercentEl.classList.remove('warning', 'danger');
+    budgetBadge.classList.remove('warning', 'danger');
+    budgetBadge.hidden = true;
+
+    if (!budget) {
+      budgetProgress.hidden = true;
+      return;
+    }
+    budgetProgress.hidden = false;
+
+    const percent = Math.round((used / budget) * 100);
+    budgetUsedEl.textContent = formatWon(used);
+    budgetTotalEl.textContent = formatWon(budget);
+    budgetPercentEl.textContent = `${percent}%`;
+    budgetBarFill.style.width = `${Math.min(percent, 100)}%`;
+
+    if (percent > 100) {
+      budgetBarFill.classList.add('danger');
+      budgetPercentEl.classList.add('danger');
+      budgetBadge.classList.add('danger');
+      budgetBadge.textContent = '🚨 예산 초과';
+      budgetBadge.hidden = false;
+    } else if (percent >= 80) {
+      budgetBarFill.classList.add('warning');
+      budgetPercentEl.classList.add('warning');
+      budgetBadge.classList.add('warning');
+      budgetBadge.textContent = '⚠️ 주의';
+      budgetBadge.hidden = false;
+    }
+  }
+
   function render() {
     updateMonthLabel();
     renderSummary();
+    renderBudget();
     renderList();
   }
 
@@ -225,6 +304,19 @@
       currentFilter = btn.dataset.filter;
       renderList();
     });
+  });
+
+  budgetForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const amount = Number(budgetInput.value);
+    if (!amount || amount <= 0) {
+      showToast('예산 금액을 입력해주세요');
+      return;
+    }
+    budgets[monthKey(viewDate)] = amount;
+    saveBudgets(budgets);
+    renderBudget();
+    showToast('예산이 설정되었습니다');
   });
 
   prevMonthBtn.addEventListener('click', () => {

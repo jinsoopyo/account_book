@@ -32,6 +32,26 @@
     </div>
   </section>
 
+  <section class="budget-section">
+    <div class="budget-header">
+      <h2 id="budgetTitle">이번 달 예산</h2>
+      <span id="budgetBadge" class="budget-badge" hidden></span>
+    </div>
+    <form id="budgetForm" class="budget-form">
+      <input type="number" id="budgetInput" class="budget-input" placeholder="지출 예산 입력" min="0" step="1" inputmode="numeric">
+      <button type="submit" class="budget-save-btn">설정</button>
+    </form>
+    <div class="budget-progress" id="budgetProgress" hidden>
+      <div class="budget-stats-row">
+        <span class="budget-amounts"><b id="budgetUsed">0원</b> / <span id="budgetTotal">0원</span></span>
+        <span class="budget-percent" id="budgetPercent">0%</span>
+      </div>
+      <div class="budget-bar-track">
+        <div class="budget-bar-fill" id="budgetBarFill"></div>
+      </div>
+    </div>
+  </section>
+
   <section class="form-section">
     <form id="txForm">
       <div class="form-row">
