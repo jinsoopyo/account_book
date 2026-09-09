@@ -1,6 +1,7 @@
 (() => {
-  const STORAGE_KEY = 'account-book-transactions';
-  const BUDGET_KEY = 'account-book-budgets';
+  const SUPABASE_URL = 'https://puifbscclipnoaeuhdub.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1aWZic2NjbGlwbm9hZXVoZHViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5MzI5MDksImV4cCI6MjEwNDUwODkwOX0.URV6beD0pGcQJ-lpof0cMqQPf89cr_etG2fDbGzmDJo';
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   const CATEGORIES = {
     expense: [
@@ -55,37 +56,46 @@
   let viewDate = new Date();
   viewDate.setDate(1);
 
-  function loadTransactions() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch (e) {
-      console.error('failed to load transactions', e);
+  function rowToTx(row) {
+    return {
+      id: row.id,
+      type: row.type,
+      category: row.category,
+      amount: Number(row.amount),
+      memo: row.memo || '',
+      date: row.tx_date,
+      createdAt: new Date(row.created_at).getTime(),
+    };
+  }
+
+  async function fetchTransactions() {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .order('tx_date', { ascending: false });
+    if (error) {
+      console.error('failed to load transactions', error);
+      showToast('데이터를 불러오지 못했습니다');
       return [];
     }
+    return data.map(rowToTx);
   }
 
-  function saveTransactions(list) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  }
-
-  let transactions = loadTransactions();
-
-  function loadBudgets() {
-    try {
-      const raw = localStorage.getItem(BUDGET_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch (e) {
-      console.error('failed to load budgets', e);
+  async function fetchBudgets() {
+    const { data, error } = await supabase.from('budgets').select('*');
+    if (error) {
+      console.error('failed to load budgets', error);
       return {};
     }
+    const map = {};
+    data.forEach((row) => {
+      map[row.month_key] = Number(row.amount);
+    });
+    return map;
   }
 
-  function saveBudgets(map) {
-    localStorage.setItem(BUDGET_KEY, JSON.stringify(map));
-  }
-
-  let budgets = loadBudgets();
+  let transactions = [];
+  let budgets = {};
 
   function formatWon(n) {
     return n.toLocaleString('ko-KR') + '원';
@@ -257,27 +267,36 @@
     btn.addEventListener('click', () => setType(btn.dataset.type));
   });
 
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const amount = Number(amountInput.value);
     if (!amount || amount <= 0) {
       showToast('금액을 입력해주세요');
       return;
     }
-    const tx = {
-      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-      type: currentType,
-      category: categorySelect.value,
-      amount,
-      memo: memoInput.value.trim(),
-      date: dateInput.value || todayStr(),
-      createdAt: Date.now(),
-    };
-    transactions.push(tx);
-    saveTransactions(transactions);
+    const date = dateInput.value || todayStr();
+    const { data, error } = await supabase
+      .from('transactions')
+      .insert({
+        type: currentType,
+        category: categorySelect.value,
+        amount,
+        memo: memoInput.value.trim(),
+        tx_date: date,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('failed to add transaction', error);
+      showToast('추가하지 못했습니다');
+      return;
+    }
+
+    transactions.push(rowToTx(data));
 
     // jump view to the month of the new transaction
-    const [y, m] = tx.date.split('-').map(Number);
+    const [y, m] = date.split('-').map(Number);
     viewDate = new Date(y, m - 1, 1);
 
     amountInput.value = '';
@@ -287,12 +306,17 @@
     showToast('추가되었습니다');
   });
 
-  txList.addEventListener('click', (e) => {
+  txList.addEventListener('click', async (e) => {
     const btn = e.target.closest('.tx-delete');
     if (!btn) return;
     const id = btn.dataset.id;
+    const { error } = await supabase.from('transactions').delete().eq('id', id);
+    if (error) {
+      console.error('failed to delete transaction', error);
+      showToast('삭제하지 못했습니다');
+      return;
+    }
     transactions = transactions.filter((t) => t.id !== id);
-    saveTransactions(transactions);
     render();
     showToast('삭제되었습니다');
   });
@@ -306,15 +330,23 @@
     });
   });
 
-  budgetForm.addEventListener('submit', (e) => {
+  budgetForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const amount = Number(budgetInput.value);
     if (!amount || amount <= 0) {
       showToast('예산 금액을 입력해주세요');
       return;
     }
-    budgets[monthKey(viewDate)] = amount;
-    saveBudgets(budgets);
+    const key = monthKey(viewDate);
+    const { error } = await supabase
+      .from('budgets')
+      .upsert({ month_key: key, amount, updated_at: new Date().toISOString() });
+    if (error) {
+      console.error('failed to save budget', error);
+      showToast('예산을 저장하지 못했습니다');
+      return;
+    }
+    budgets[key] = amount;
     renderBudget();
     showToast('예산이 설정되었습니다');
   });
@@ -329,7 +361,11 @@
   });
 
   // init
-  dateInput.value = todayStr();
-  populateCategories();
-  render();
+  async function init() {
+    dateInput.value = todayStr();
+    populateCategories();
+    [transactions, budgets] = await Promise.all([fetchTransactions(), fetchBudgets()]);
+    render();
+  }
+  init();
 })();
